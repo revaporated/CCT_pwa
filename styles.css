@@ -259,6 +259,15 @@ h1 {
   min-width: 0;
 }
 
+.field-note {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
 .field select,
 .field input {
   width: 100%;

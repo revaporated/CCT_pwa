@@ -427,6 +427,13 @@
             <span>Playback speed <strong id="playbackSpeedValue">1x</strong></span>
             <input type="range" id="playbackSpeedSelect" min="1" max="1.5" step="0.1" value="1">
           </label>
+          <label class="field advanced-only hidden" id="headphoneDelayField">
+            <span>
+              Headphone Delay (ms)
+              <small class="field-note">Enter the estimated audio delay. Use 0 for no compensation.</small>
+            </span>
+            <input type="number" id="headphoneDelayInput" value="0" min="0" max="2000" step="25" inputmode="numeric">
+          </label>
           <div class="audio-subsection-header beep-subsection">Error beep</div>
           <label class="toggle-field"><input type="checkbox" id="beepToggle" checked> Beep on error</label>
           <label class="field" id="beepVolumeField">

@@ -37,6 +37,12 @@ let settingsSaveTimerId=null;
 let intervalStatsTimerId=null;
 let countdownTimerId=null;
 let endSessionConfirmTimerId=null;
+let questionTimelineTimerId=null;
+let pendingQuestionStates=[];
+let sessionHeadphoneDelayMs=0;
+let sessionDurationMs=0;
+let stimulusProductionEndAt=0;
+let lastActivatedTraceIndex=-1;
 const END_SESSION_CONFIRMATION_MS=2000;
 const HISTORY_PAGE_SIZE=20;
 const historyFilters={
@@ -58,6 +64,8 @@ const DEFAULT_BEEP_GAIN=0.12;
 const DEFAULT_BEEP_VOLUME_PERCENT=50;
 const MAX_BEEP_VOLUME_PERCENT=100;
 const MAX_BEEP_GAIN=0.9;
+const MAX_HEADPHONE_DELAY_MS=2000;
+const HEADPHONE_DELAY_STEP_MS=25;
 const defaultSettings={
   startingInterval:"3000",
   maximumInterval:"3000",
@@ -72,6 +80,7 @@ const defaultSettings={
   nBackLevel:"1",
   voice:"nathan",
   playbackSpeed:"1",
+  headphoneDelayMs:"0",
   beepVolume:String(DEFAULT_BEEP_VOLUME_PERCENT),
   beepEnabled:true,
   darkMode:false,
@@ -171,6 +180,14 @@ function normalizeBeepVolumeSetting(value,fallback=defaultSettings.beepVolume){
   return parsed;
 }
 
+function normalizeHeadphoneDelay(value,fallback=defaultSettings.headphoneDelayMs){
+  const parsed=Number(value);
+  const fallbackParsed=Number(fallback);
+  const resolved=Number.isFinite(parsed) ? parsed : (Number.isFinite(fallbackParsed) ? fallbackParsed : 0);
+  const clamped=Math.max(0,Math.min(MAX_HEADPHONE_DELAY_MS,resolved));
+  return Math.round(clamped/HEADPHONE_DELAY_STEP_MS)*HEADPHONE_DELAY_STEP_MS;
+}
+
 function normalizeNBackLevel(value,fallback=defaultSettings.nBackLevel){
   const parsed=Number(value);
   const fallbackParsed=Number(fallback);
@@ -215,6 +232,7 @@ function normalizeSavedSettings(parsed){
   const nBackLevel=String(normalizeNBackLevel(parsed.nBackLevel));
   const voice=resolveVoiceKey(parsed.voice,defaultSettings.voice);
   const beepVolume=String(normalizeBeepVolumeSetting(parsed.beepVolume,defaultSettings.beepVolume));
+  const headphoneDelayMs=String(normalizeHeadphoneDelay(parsed.headphoneDelayMs,defaultSettings.headphoneDelayMs));
 
   return {
     ...defaultSettings,
@@ -231,6 +249,7 @@ function normalizeSavedSettings(parsed){
     nBackLevel,
     voice,
     playbackSpeed:String(Math.max(1,Math.min(1.5,parseFloat(parsed.playbackSpeed)||parseFloat(defaultSettings.playbackSpeed)))),
+    headphoneDelayMs,
     beepVolume,
     showAdvancedSettings:!!parsed.showAdvancedSettings,
     showIntervalTiming:!!parsed.showIntervalTiming,
@@ -319,6 +338,7 @@ function getSettingsFromForm(){
     nBackLevel:String(normalizeNBackLevel(nBackLevelInput.value)),
     voice:resolveVoiceKey(voiceSelect.value || selectedVoice),
     playbackSpeed:playbackSpeedSelect.value,
+    headphoneDelayMs:String(normalizeHeadphoneDelay(headphoneDelayInput.value)),
     beepVolume:beepVolumeSelect.value,
     beepEnabled:beepToggle.checked,
     darkMode:themeToggle.checked,
@@ -397,6 +417,7 @@ function applyAdvancedSettingsVisibility(isVisible){
   advancedSections.classList.toggle("hidden",!isVisible);
   modeField.classList.toggle("hidden",!isVisible);
   nBackLevelField.classList.toggle("hidden",!isVisible);
+  headphoneDelayField.classList.toggle("hidden",!isVisible);
   if(!isVisible && thresholdHelp){
     thresholdHelp.classList.remove("tooltip-pinned");
   }
@@ -428,6 +449,7 @@ function applySettings(settings){
   voiceSelect.value=selectedVoice;
   playbackSpeedSelect.value=Math.max(1,Math.min(1.5,parseFloat(settings.playbackSpeed)||1));
   playbackSpeedValue.textContent=formatPlaybackSpeed(playbackSpeedSelect.value);
+  headphoneDelayInput.value=String(normalizeHeadphoneDelay(settings.headphoneDelayMs));
   beepVolumeSelect.value=normalizeBeepVolumeSetting(settings.beepVolume);
   beepVolumeValue.textContent=formatBeepVolume(beepVolumeSelect.value);
   beepVolume=normalizeBeepVolumeSetting(beepVolumeSelect.value);
@@ -477,6 +499,8 @@ function handleSettingsChange(event){
   }else if(target===playbackSpeedSelect){
     playbackSpeed=parseFloat(playbackSpeedSelect.value)||1;
     playbackSpeedValue.textContent=formatPlaybackSpeed(playbackSpeed);
+  }else if(target===headphoneDelayInput){
+    headphoneDelayInput.value=String(normalizeHeadphoneDelay(headphoneDelayInput.value));
   }else if(target===beepVolumeSelect){
     beepVolume=normalizeBeepVolumeSetting(beepVolumeSelect.value);
     beepVolumeValue.textContent=formatBeepVolume(beepVolume);
@@ -795,10 +819,11 @@ function normalizeHistoryRecord(record){
 
   const startingInterval=Math.max(100,Number(record?.startingInterval)||parseInt(defaultSettings.startingInterval));
   const maximumInterval=Math.max(startingInterval,Math.min(3000,Number(record?.maximumInterval)||startingInterval));
+  const headphoneDelayMs=normalizeHeadphoneDelay(record?.headphoneDelayMs,defaultSettings.headphoneDelayMs);
 
   return {
     ...record,
-    schemaVersion:2,
+    schemaVersion:3,
     sessionId:record?.sessionId || generateSessionId(),
     startedAt,
     endedAt,
@@ -821,6 +846,7 @@ function normalizeHistoryRecord(record){
     intervalIncrement:Math.max(10,Number(record?.intervalIncrement)||parseInt(defaultSettings.intervalIncrement)),
     voice:resolveVoiceKey(record?.voice,defaultSettings.voice),
     playbackSpeed:Math.max(1,Math.min(1.5,Number(record?.playbackSpeed)||parseFloat(defaultSettings.playbackSpeed))),
+    headphoneDelayMs,
     includeInTrends,
     thresholds:{
       correct:correctThreshold,
@@ -854,6 +880,7 @@ function normalizeLatestTraceRecord(record){
       : (record?.status==="Interrupted" ? "Interrupted" : "Completed"),
     totalQuestionsAsked:Math.max(0,Number(record?.totalQuestionsAsked)||0),
     nBackLevel:normalizeNBackLevel(record?.nBackLevel),
+    headphoneDelayMs:normalizeHeadphoneDelay(record?.headphoneDelayMs,defaultSettings.headphoneDelayMs),
     trace:normalizedTrace
   };
 }
@@ -878,8 +905,9 @@ function normalizeTrialLogRecord(record){
   });
 
   return {
-    schemaVersion:1,
+    schemaVersion:2,
     sessionId,
+    headphoneDelayMs:normalizeHeadphoneDelay(record?.headphoneDelayMs,defaultSettings.headphoneDelayMs),
     trials
   };
 }
@@ -1728,15 +1756,17 @@ function buildSessionRecord(responseTimeStats){
     intervalIncrement,
     voice:selectedVoice,
     playbackSpeed,
+    headphoneDelayMs:sessionHeadphoneDelayMs,
     includeInTrends:sessionOutcome==="Completed"
   });
 }
 
 function buildLatestTraceRecord(){
   const firstTraceIndex=nBackLevel;
+  const activatedTraceEnd=Math.max(firstTraceIndex,lastActivatedTraceIndex+1);
   const lastTraceIndex=Math.max(
     firstTraceIndex,
-    sessionIntervalTrace.length-(excludeLastQuestionFromTrace ? 1 : 0)
+    Math.min(sessionIntervalTrace.length,activatedTraceEnd-(excludeLastQuestionFromTrace ? 1 : 0))
   );
   const trimmedTrace=new Array(Math.max(0,lastTraceIndex-firstTraceIndex));
   for(let sourceIndex=firstTraceIndex; sourceIndex<lastTraceIndex; sourceIndex++){
@@ -1755,6 +1785,7 @@ function buildLatestTraceRecord(){
     endedAt:sessionEndedAt,
     status:sessionOutcome,
     nBackLevel,
+    headphoneDelayMs:sessionHeadphoneDelayMs,
     totalQuestionsAsked,
     trace:trimmedTrace
   });
@@ -1763,6 +1794,7 @@ function buildLatestTraceRecord(){
 function buildTrialLogRecord(){
   return normalizeTrialLogRecord({
     sessionId:currentSessionId || generateSessionId(),
+    headphoneDelayMs:sessionHeadphoneDelayMs,
     trials:sessionTrialRecords
   });
 }
@@ -4650,7 +4682,16 @@ function clearPendingAnswer(){
   answer.value="";
 }
 
+function clearQuestionTimeline(){
+  if(questionTimelineTimerId!==null){
+    clearTimeout(questionTimelineTimerId);
+    questionTimelineTimerId=null;
+  }
+  pendingQuestionStates=[];
+}
+
 function resetQuestionStates(){
+  clearQuestionTimeline();
   activeQuestionState=null;
 }
 
@@ -4658,18 +4699,65 @@ function hasEnoughStimuliForQuestion(){
   return stimulusHistory.length >= nBackLevel + 1;
 }
 
-function createQuestionState(startedAt){
+function createQuestionState(startedAt,questionInterval=interval){
   const traceIndex=Math.max(0,sessionIntervalTrace.length-1);
   const latestIndex=stimulusHistory.length-1;
   const nBackNumber=stimulusHistory[latestIndex-nBackLevel];
   const latestNumber=stimulusHistory[latestIndex];
   return {
     startedAt,
-    responseInterval:interval,
+    responseInterval:questionInterval,
     expectedAnswer:hasEnoughStimuliForQuestion() ? getExpectedAnswer(nBackNumber,latestNumber) : null,
     traceIndex,
     resolved:false
   };
+}
+
+function activateQuestionState(questionState){
+  clearPendingAnswer();
+  activeQuestionState=questionState;
+  if(!questionState) return;
+
+  awaitingAnswer=true;
+  responseStartedAt=questionState.startedAt;
+  responseInterval=questionState.responseInterval;
+}
+
+function scheduleQuestionTimeline(){
+  if(questionTimelineTimerId!==null){
+    clearTimeout(questionTimelineTimerId);
+    questionTimelineTimerId=null;
+  }
+  if(!gameRunning || !pendingQuestionStates.length) return;
+
+  const delay=Math.max(0,pendingQuestionStates[0].activateAt-getClockTime());
+  questionTimelineTimerId=setTimeout(()=>{
+    questionTimelineTimerId=null;
+    advanceQuestionTimeline(getClockTime());
+  },delay);
+}
+
+function advanceQuestionTimeline(now=getClockTime()){
+  if(!gameRunning) return;
+  const timelineNow=Number.isFinite(Number(now)) ? Number(now) : getClockTime();
+
+  while(pendingQuestionStates.length && pendingQuestionStates[0].activateAt<=timelineNow){
+    const nextQuestion=pendingQuestionStates.shift();
+    if(activeQuestionState && !activeQuestionState.resolved){
+      finalizeQuestionState(activeQuestionState,answer.value,nextQuestion.activateAt);
+      if(!gameRunning) return;
+    }
+
+    lastActivatedTraceIndex=Math.max(lastActivatedTraceIndex,nextQuestion.traceIndex);
+    activateQuestionState(nextQuestion.questionState);
+  }
+
+  scheduleQuestionTimeline();
+}
+
+function queueQuestionState(questionState,activateAt,traceIndex){
+  pendingQuestionStates.push({ questionState, activateAt, traceIndex });
+  scheduleQuestionTimeline();
 }
 
 function finalizeQuestionState(questionState,submittedValue,finalizedAt){
@@ -4812,6 +4900,7 @@ function buildSessionHistoryCsv(sessions){
     { header:"intervalIncrement", getValue:session=>session.intervalIncrement },
     { header:"voice", getValue:session=>session.voice },
     { header:"playbackSpeed", getValue:session=>session.playbackSpeed },
+    { header:"headphoneDelayMs", getValue:session=>session.headphoneDelayMs },
     { header:"includeInTrends", getValue:session=>session.includeInTrends }
   ];
   const rows=[columns.map(column=>escapeCsvCell(column.header)).join(",")];
@@ -4852,11 +4941,15 @@ function scheduleNextStimulus(delay=interval){
 function scheduleNextStimulusFromLastStimulus(){
   if(!gameRunning) return;
   const anchorAt=lastStimulusAt || getClockTime();
-  scheduleNextStimulus((anchorAt + interval) - getClockTime());
+  const nextStimulusAt=anchorAt+interval;
+  if(endCondition==="timer" && stimulusProductionEndAt>0 && nextStimulusAt>=stimulusProductionEndAt){
+    return;
+  }
+  scheduleNextStimulus(nextStimulusAt-getClockTime());
 }
 
-function startStimulusScheduler(){
-  lastStimulusAt=getClockTime()-interval;
+function startStimulusScheduler(startedAt=getClockTime()){
+  lastStimulusAt=startedAt-interval;
   scheduleNextStimulusFromLastStimulus();
 }
 
@@ -4865,15 +4958,11 @@ function runStimulus(){
 
   isStimulusTick=true;
 
-  const expiredQuestionState=activeQuestionState;
-  if(expiredQuestionState && !expiredQuestionState.resolved){
-    finalizeQuestionState(expiredQuestionState,answer.value,getClockTime());
-  }
-
   const num=getRandomNumber();
   const now=getClockTime();
+  const stimulusInterval=interval;
+  const audibleAt=now+sessionHeadphoneDelayMs;
   lastStimulusAt=now;
-  clearPendingAnswer();
   stimulusHistory.push(num);
   if(stimulusHistory.length>nBackLevel+1){
     stimulusHistory.shift();
@@ -4881,21 +4970,17 @@ function runStimulus(){
   stimulusCount++;
   sessionIntervalTrace.push({
     questionNumber:stimulusCount,
-    interval,
-    timestamp:now,
+    interval:stimulusInterval,
+    timestamp:audibleAt,
     responseTime:null
   });
+  const traceIndex=sessionIntervalTrace.length-1;
   playStimulusAudio(num);
 
-  if(hasEnoughStimuliForQuestion()){
-    awaitingAnswer=true;
-    responseStartedAt=now;
-    responseInterval=interval;
-    activeQuestionState=createQuestionState(now);
-  }else{
-    clearPendingAnswer();
-    activeQuestionState=null;
-  }
+  const questionState=hasEnoughStimuliForQuestion()
+    ? createQuestionState(audibleAt,stimulusInterval)
+    : null;
+  queueQuestionState(questionState,audibleAt,traceIndex);
 
   isStimulusTick=false;
   if(gameRunning){
@@ -4906,7 +4991,7 @@ function runStimulus(){
 function updateTimer(){
   countdownTimerId=null;
   if(!gameRunning||endCondition!=="timer")return;
-  const remainingMs=endTime-Date.now();
+  const remainingMs=Math.min(sessionDurationMs,endTime-Date.now());
   const r=Math.max(0,Math.ceil(remainingMs/1000));
   const displayValue=String(r);
   if(timeLeft.textContent!==displayValue){
@@ -4953,6 +5038,9 @@ async function startGame(){
   nBackLevel=normalizeNBackLevel(nBackLevelInput.value);
   nBackLevelInput.value=String(nBackLevel);
   const duration=Math.max(1,parseInt(durationInput.value)||parseInt(defaultSettings.duration))*60000;
+  sessionDurationMs=duration;
+  sessionHeadphoneDelayMs=normalizeHeadphoneDelay(headphoneDelayInput.value);
+  headphoneDelayInput.value=String(sessionHeadphoneDelayMs);
   beepEnabled=beepToggle.checked;
   showIntervalTiming=showIntervalTimingToggle.checked;
   playbackSpeed=parseFloat(playbackSpeedSelect.value)||1;
@@ -4976,15 +5064,17 @@ async function startGame(){
   intervalKeysDirty=true;
   sessionIntervalTrace=[];
   resetQuestionStates();
+  lastActivatedTraceIndex=-1;
   resetFeedbackIndicators();
   applyIntervalTimingVisibility(showIntervalTiming);
-  sessionStartedAt=Date.now();
+  sessionStartedAt=Date.now()+sessionHeadphoneDelayMs;
   sessionEndedAt=0;
   responseStartedAt=0;
   responseInterval=0;
 
   gameRunning=false;
   awaitingAnswer=false;
+  stimulusProductionEndAt=0;
 
   currentIntervalStart=showIntervalTiming?getClockTime():0;
 
@@ -5004,12 +5094,18 @@ async function startGame(){
   timeoutId=setTimeout(()=>{
     if(sessionState!=="starting") return;
 
+    const activeClockAt=getClockTime();
+    sessionStartedAt=Date.now()+sessionHeadphoneDelayMs;
+    stimulusProductionEndAt=endCondition==="timer" ? activeClockAt+sessionDurationMs : 0;
+    endTime=endCondition==="timer" ? sessionStartedAt+sessionDurationMs : 0;
+    currentIntervalStart=showIntervalTiming ? activeClockAt : 0;
+
     gameRunning=true;
     setSessionState("active");
     answer.focus();
     void requestSessionWakeLock();
 
-    startStimulusScheduler();
+    startStimulusScheduler(activeClockAt);
     if(endCondition==="timer") updateTimer();
     tickIntervalTime(); // START CONTINUOUS TRACKING
   },100);
@@ -5019,6 +5115,10 @@ function stopGame(reason="manual"){
   if(sessionState!=="active"&&sessionState!=="starting") return;
   resetEndSessionConfirmation();
 
+  if(gameRunning){
+    advanceQuestionTimeline(getClockTime());
+  }
+
   sessionOutcome=reason==="manual"
     ? "Manually exited"
     : (reason==="interrupted" ? "Interrupted" : "Completed");
@@ -5026,6 +5126,8 @@ function stopGame(reason="manual"){
   sessionEndedAt=Date.now();
   gameRunning=false;
   clearTimeout(timeoutId);
+  clearQuestionTimeline();
+  stimulusProductionEndAt=0;
   if(intervalStatsTimerId!==null){
     clearTimeout(intervalStatsTimerId);
     intervalStatsTimerId=null;
@@ -5075,7 +5177,8 @@ function stopGame(reason="manual"){
 
 function checkInputLive(event,submittedAt=getClockTime()){
   if(sessionState!=="active") return;
-  if(!awaitingAnswer || !hasEnoughStimuliForQuestion() || !activeQuestionState || activeQuestionState.resolved) return;
+  advanceQuestionTimeline(submittedAt);
+  if(!awaitingAnswer || !activeQuestionState || activeQuestionState.resolved) return;
 
   const submittedValue=answer.value.trim();
   if(submittedValue==="") return;
@@ -5086,7 +5189,9 @@ function checkInputLive(event,submittedAt=getClockTime()){
 }
 
 function enterAnswerFromKeypad({ value=null, action=null, submittedAt=getClockTime() }={}){
-  if(sessionState!=="active" || !awaitingAnswer || !activeQuestionState || activeQuestionState.resolved) return;
+  if(sessionState!=="active") return;
+  advanceQuestionTimeline(submittedAt);
+  if(!awaitingAnswer || !activeQuestionState || activeQuestionState.resolved) return;
 
   const currentValue=answer.value;
   let nextValue=currentValue;
@@ -5146,6 +5251,8 @@ const thresholdInfoBtn=document.getElementById("thresholdInfoBtn");
 const voiceSelect=document.getElementById("voiceSelect");
 const voiceTestBtn=document.getElementById("voiceTestBtn");
 const playbackSpeedSelect=document.getElementById("playbackSpeedSelect");
+const headphoneDelayField=document.getElementById("headphoneDelayField");
+const headphoneDelayInput=document.getElementById("headphoneDelayInput");
 const beepVolumeField=document.getElementById("beepVolumeField");
 const beepVolumeSelect=document.getElementById("beepVolume");
 const beepVolumeValue=document.getElementById("beepVolumeValue");
@@ -5264,6 +5371,7 @@ const committedSettingsControls=[
   nBackLevelInput,
   showAdvancedSettingsToggle,
   voiceSelect,
+  headphoneDelayInput,
   beepToggle,
   themeToggle,
   showIntervalTimingToggle

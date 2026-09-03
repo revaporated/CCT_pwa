@@ -13,6 +13,7 @@ The application stores settings, session history, and trial data on the device. 
 - A screen wake lock is requested during an active session.
 - A hidden or locked application ends the active session as interrupted.
 - Audio uses preloaded Web Audio buffers when the browser supports them.
+- A manual headphone-delay setting aligns questions with delayed audio.
 - A service worker caches the application and voice files for offline use.
 
 ## Run locally
