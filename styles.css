@@ -12,6 +12,19 @@
   --keypad-pressed: #c9dcda;
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body {
   font-family: Arial, Helvetica, sans-serif;
   display: flex;
@@ -541,6 +554,12 @@ button:disabled {
   color: var(--bad);
 }
 
+.danger-button.is-confirming {
+  border-color: var(--bad);
+  background: var(--bad);
+  color: white;
+}
+
 .danger-button:not(:disabled):hover {
   border-color: var(--bad);
   background: var(--bad);
@@ -568,6 +587,9 @@ button:disabled {
 }
 
 .history-view {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   text-align: left;
 }
 
@@ -631,6 +653,7 @@ button:disabled {
   gap: 12px;
   width: min(290px, calc(100vw - 48px));
   padding: 14px;
+  box-sizing: border-box;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
@@ -658,6 +681,7 @@ button:disabled {
 }
 
 .history-analytics {
+  min-width: 0;
   margin-top: 14px;
 }
 
@@ -767,11 +791,14 @@ button:disabled {
   gap: 10px;
   margin-top: 10px;
   justify-items: center;
+  min-width: 0;
 }
 
 .chart-card {
   display: grid;
   width: min(100%, 760px);
+  max-width: 100%;
+  min-width: 0;
   gap: 8px;
   padding: 12px;
   border: 1px solid var(--border);
@@ -872,6 +899,9 @@ button:disabled {
 
 .chart-panel {
   position: relative;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 210px;
 }
 
@@ -1035,8 +1065,10 @@ button:disabled {
 }
 
 .trial-data-table-wrap {
+  width: 100%;
+  max-width: 100%;
   margin-top: 8px;
-  overflow-x: auto;
+  overflow-x: hidden;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
@@ -1044,7 +1076,8 @@ button:disabled {
 
 .trial-data-table {
   width: 100%;
-  min-width: 560px;
+  min-width: 0;
+  table-layout: fixed;
   border-collapse: collapse;
   color: var(--text);
   font-size: 13px;
@@ -1079,7 +1112,8 @@ button:disabled {
 }
 
 .trial-data-session-cell {
-  min-width: 300px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .trial-data-session-date {
@@ -1128,6 +1162,9 @@ button:disabled {
 
 .history-list {
   display: grid;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   gap: 8px;
   margin-top: 10px;
 }
@@ -1208,6 +1245,13 @@ button:disabled {
 }
 
 @media (max-width: 640px) {
+  .history-chart-mode-field,
+  .history-chart-nback-field {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
+
   .history-header {
     grid-template-columns: auto minmax(0, 1fr);
     align-items: start;
@@ -1270,6 +1314,30 @@ button:disabled {
     width: 100%;
     justify-content: flex-start;
     margin-left: 0;
+  }
+
+  .trial-data-table th,
+  .trial-data-table td {
+    padding: 8px 6px;
+  }
+
+  .trial-data-select-cell {
+    width: 34px;
+  }
+
+  .trial-data-count-cell {
+    width: 48px;
+    text-align: center !important;
+  }
+
+  .trial-data-download-cell {
+    width: 84px;
+  }
+
+  .trial-data-download-button {
+    width: 100%;
+    padding: 7px 5px;
+    white-space: normal;
   }
 }
 
@@ -1516,7 +1584,8 @@ button:disabled {
 
 .keypad-button {
   min-width: 0;
-  min-height: 58px;
+  min-height: 0;
+  aspect-ratio: 4 / 3;
   margin: 0;
   padding: 8px;
   border-color: var(--border);
@@ -1830,6 +1899,9 @@ button:disabled {
   }
 
   body.session-active .session-view {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - max(10px, env(safe-area-inset-top)));
     min-height: calc(100dvh - max(10px, env(safe-area-inset-top)));
     padding-bottom: max(12px, env(safe-area-inset-bottom));
     box-sizing: border-box;
@@ -1865,11 +1937,13 @@ button:disabled {
   }
 
   body.session-active .keypad-button {
-    min-height: clamp(50px, 14.5vw, 62px);
+    min-height: 0;
   }
 
   body.session-active #endSessionBtn {
-    margin-top: 10px;
+    flex: 0 0 auto;
+    align-self: center;
+    margin: auto auto 0;
   }
 
   body.session-active #intervalStats {
@@ -1883,7 +1957,4 @@ button:disabled {
     display: none;
   }
 
-  body.session-active .keypad-button {
-    min-height: 47px;
-  }
 }

@@ -36,6 +36,8 @@ let historyTrendUpdateChain=Promise.resolve();
 let settingsSaveTimerId=null;
 let intervalStatsTimerId=null;
 let countdownTimerId=null;
+let endSessionConfirmTimerId=null;
+const END_SESSION_CONFIRMATION_MS=2000;
 const HISTORY_PAGE_SIZE=20;
 const historyFilters={
   status:"all",
@@ -4921,6 +4923,7 @@ function updateTimer(){
 
 async function startGame(){
   if(sessionState!=="idle") return;
+  resetEndSessionConfirmation();
 
   selectedVoice=resolveVoiceKey(voiceSelect.value);
   voiceSelect.value=selectedVoice;
@@ -5014,6 +5017,7 @@ async function startGame(){
 
 function stopGame(reason="manual"){
   if(sessionState!=="active"&&sessionState!=="starting") return;
+  resetEndSessionConfirmation();
 
   sessionOutcome=reason==="manual"
     ? "Manually exited"
@@ -5220,6 +5224,31 @@ const downloadSelectedTrialDataBtn=document.getElementById("downloadSelectedTria
 const trialDataSelectAllCheckbox=document.getElementById("trialDataSelectAllCheckbox");
 const trialDataSelectionSummary=document.getElementById("trialDataSelectionSummary");
 const trialDataTableBody=document.getElementById("trialDataTableBody");
+
+function resetEndSessionConfirmation(){
+  if(endSessionConfirmTimerId!==null){
+    clearTimeout(endSessionConfirmTimerId);
+    endSessionConfirmTimerId=null;
+  }
+  endSessionBtn.textContent="End Session";
+  endSessionBtn.classList.remove("is-confirming");
+  endSessionBtn.setAttribute("aria-label","End Session");
+}
+
+function handleEndSessionPress(){
+  if(sessionState!=="active"&&sessionState!=="starting") return;
+  if(endSessionConfirmTimerId!==null){
+    resetEndSessionConfirmation();
+    stopGame("manual");
+    return;
+  }
+
+  endSessionBtn.textContent="Press again to confirm";
+  endSessionBtn.classList.add("is-confirming");
+  endSessionBtn.setAttribute("aria-label","Press again within two seconds to end the session");
+  endSessionConfirmTimerId=setTimeout(resetEndSessionConfirmation,END_SESSION_CONFIRMATION_MS);
+}
+
 const liveSettingsControls=[
   intervalIncrementSelect,
   durationInput,
@@ -5241,7 +5270,7 @@ const committedSettingsControls=[
 ];
 
 startBtn.onclick=startGame;
-endSessionBtn.onclick=()=>stopGame("manual");
+endSessionBtn.onclick=handleEndSessionPress;
 newSessionBtn.onclick=()=>setSessionState("idle");
 resetSettingsBtn.onclick=resetSettingsToDefault;
 historyBtn.onclick=()=>{
