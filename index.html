@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#101923">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CCT">
+<meta name="description" content="Private, device-local cognitive control training with adaptive auditory pacing.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Cognitive Control Training">
+<meta property="og:description" content="Adaptive auditory pacing. Private on your device.">
+<meta property="og:url" content="https://revaporated.github.io/CCT_pwa/">
+<meta property="og:image" content="https://revaporated.github.io/CCT_pwa/social-preview.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Cognitive Control Training">
+<meta name="twitter:description" content="Adaptive auditory pacing. Private on your device.">
+<meta name="twitter:image" content="https://revaporated.github.io/CCT_pwa/social-preview.png">
+<title>CCT · Cognitive Control Training</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="container">
+<h1>Cognitive Control Training</h1>
+<p class="subtitle">Auditory paced addition training</p>
+
+<div id="sessionView" class="session-view gameplay-surface hidden">
+  <div class="session-metrics">
+    <div class="metric">
+      <span>Current Interval</span>
+      <strong><span id="currentInterval">1000</span> ms</strong>
+    </div>
+    <div class="metric">
+      <span id="sessionLimitLabel">Time Left</span>
+      <strong><span id="timeLeft">0</span><span id="sessionLimitSuffix">s</span></strong>
+    </div>
+  </div>
+
+  <div id="feedback"></div>
+  <label class="visually-hidden" for="answer">Current answer</label>
+  <input class="answer-input" type="text" id="answer" inputmode="none" autocomplete="off" aria-label="Current answer" placeholder="Tap the keypad" readonly tabindex="-1" disabled>
+
+  <div id="keypad" class="keypad" role="group" aria-label="Answer keypad">
+    <button class="keypad-button" type="button" data-keypad-value="7" disabled>7</button>
+    <button class="keypad-button" type="button" data-keypad-value="8" disabled>8</button>
+    <button class="keypad-button" type="button" data-keypad-value="9" disabled>9</button>
+    <button class="keypad-button" type="button" data-keypad-value="4" disabled>4</button>
+    <button class="keypad-button" type="button" data-keypad-value="5" disabled>5</button>
+    <button class="keypad-button" type="button" data-keypad-value="6" disabled>6</button>
+    <button class="keypad-button" type="button" data-keypad-value="1" disabled>1</button>
+    <button class="keypad-button" type="button" data-keypad-value="2" disabled>2</button>
+    <button class="keypad-button" type="button" data-keypad-value="3" disabled>3</button>
+    <button class="keypad-button keypad-button-secondary" type="button" data-keypad-action="minus" aria-label="Negative sign" disabled>−</button>
+    <button class="keypad-button" type="button" data-keypad-value="0" disabled>0</button>
+    <button class="keypad-button keypad-button-secondary" type="button" data-keypad-action="backspace" aria-label="Delete last digit" disabled>⌫</button>
+  </div>
+  <p class="keypad-hint" aria-hidden="true">Answers submit automatically when correct.</p>
+  <button id="endSessionBtn" class="secondary-button danger-button" type="button">End Session</button>
+
+  <div id="intervalStats"></div>
+</div>
+
+<div id="resultsView" class="results-view hidden">
+  <h2>Results</h2>
+  <div class="results-grid">
+    <div class="result-metric">
+      <span>Accuracy</span>
+      <strong id="resultAccuracy">0%</strong>
+    </div>
+    <div class="result-metric">
+      <span>Average Response Time</span>
+      <strong id="resultAverageResponse">0 ms</strong>
+    </div>
+    <div class="result-metric">
+      <span>Median Correct Response Time</span>
+      <strong id="resultMedianResponse">N/A</strong>
+    </div>
+    <div class="result-metric">
+      <span>Correct Response-Time IQR</span>
+      <strong id="resultResponseTimeIqr">N/A</strong>
+    </div>
+    <div class="result-metric">
+      <span>Total Session Duration</span>
+      <strong id="resultDuration">0s</strong>
+    </div>
+    <div class="result-metric">
+      <span>Correct Answers</span>
+      <strong id="resultCorrect">0</strong>
+    </div>
+    <div class="result-metric">
+      <span>Total Questions Asked</span>
+      <strong id="resultQuestions">0</strong>
+    </div>
+    <div class="result-metric">
+      <span>Session Status</span>
+      <strong id="resultStatus">Completed</strong>
+    </div>
+  </div>
+  <div id="resultsIntervalStatsWrap" class="results-interval-stats hidden">
+    <h3>Interval Timing</h3>
+    <div id="resultsIntervalStats"></div>
+  </div>
+  <button id="newSessionBtn" class="primary-button" type="button">New Session</button>
+</div>
+
+  <div id="historyView" class="history-view hidden">
+  <div class="history-header">
+    <button id="backFromHistoryBtn" class="icon-square-button history-back-button" type="button" aria-label="Back to home" title="Back to home">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M15 6l-6 6 6 6" />
+        <path d="M10 12h9" />
+      </svg>
+    </button>
+    <h2>Training History</h2>
+  </div>
+
+  <div class="history-summary">
+    <div class="history-stat">
+      <span>Total Completed Sessions</span>
+      <strong id="historyCompletedSessions">0</strong>
+    </div>
+    <div class="history-stat">
+      <span>Total Correct Answers</span>
+      <strong id="historyCorrectAnswers">0</strong>
+    </div>
+    <div class="history-stat">
+      <span>Total Duration Trained</span>
+      <strong id="historyDurationTrained">0s</strong>
+    </div>
+  </div>
+
+  <div class="history-utility-actions">
+    <button id="exportHistoryBtn" class="secondary-button history-json-button" type="button">Export Backup</button>
+    <button id="importHistoryBtn" class="secondary-button history-json-button" type="button">Import Backup</button>
+    <input id="importHistoryInput" class="hidden" type="file" accept="application/json,.json">
+  </div>
+
+  <div id="historyAnalytics" class="history-analytics">
+    <div class="history-analytics-header">
+      <div class="section-header">Training Summary &amp; Trends</div>
+      <button id="refreshTrendChartsBtn" class="icon-square-button history-refresh-icon" type="button" aria-label="Refresh trend charts" title="Refresh trend charts">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M20 12a8 8 0 0 1-14.9 4M4 12a8 8 0 0 1 14.9-4" />
+          <path d="M6 16H5v3m13-3h1v-3" />
+        </svg>
+      </button>
+    </div>
+    <div class="history-chart-controls">
+      <label class="field history-chart-mode-field">
+        <span>Mode</span>
+        <select id="historyChartModeSelect">
+          <option value="addition">Addition</option>
+          <option value="multiplication">Multiplication</option>
+          <option value="subtraction">Subtraction (signed)</option>
+          <option value="difference">Difference (absolute)</option>
+        </select>
+      </label>
+      <label class="field history-chart-nback-field">
+        <span>N-back level</span>
+        <select id="historyChartNBackLevelSelect">
+          <option value="1">1-back</option>
+          <option value="2">2-back</option>
+          <option value="3">3-back</option>
+          <option value="4">4-back</option>
+          <option value="5">5-back</option>
+        </select>
+      </label>
+      <div id="historyChartModeNote" class="history-chart-mode-note">Charts show one arithmetic mode and one N-back level at a time.</div>
+    </div>
+    <div class="analytics-grid">
+      <section class="chart-card">
+        <div class="chart-card-header">
+          <h3>Accuracy Trend</h3>
+        </div>
+        <div class="chart-legend"><span class="chart-legend-swatch"></span><span>Average accuracy per day</span></div>
+        <div id="accuracyTrendChart" class="chart-panel"></div>
+        <div id="accuracyTrendDetails" class="chart-details" aria-live="polite" hidden>Hover, tap, or click a point to inspect it.</div>
+      </section>
+      <section class="chart-card">
+        <div class="chart-card-header">
+          <h3>Response Time Trend</h3>
+        </div>
+        <div class="chart-legend"><span class="chart-legend-swatch"></span><span>Average response time per day</span></div>
+        <div id="responseTimeTrendChart" class="chart-panel"></div>
+        <div id="responseTimeTrendDetails" class="chart-details" aria-live="polite" hidden>Hover, tap, or click a point to inspect it.</div>
+      </section>
+      <section class="chart-card chart-card-wide">
+        <div class="chart-card-header">
+          <h3>Latest Session Interval &amp; Response Time</h3>
+          <button id="latestIntervalBackBtn" class="secondary-button chart-back-button hidden" type="button">Back to Overview</button>
+        </div>
+        <div class="chart-legend chart-legend-multi">
+          <span class="chart-legend-item"><span class="chart-legend-swatch chart-legend-swatch-interval"></span><span>Interval</span></span>
+          <span class="chart-legend-item"><span class="chart-legend-swatch chart-legend-swatch-response"></span><span>Response time</span></span>
+        </div>
+        <label class="latest-interval-group-control" for="latestIntervalGroupSize">
+          <span>Questions per group</span>
+          <span class="latest-interval-group-input">
+            <input id="latestIntervalGroupSize" type="range" min="1" max="50" step="1" value="1">
+            <output id="latestIntervalGroupSizeValue" for="latestIntervalGroupSize">1</output>
+          </span>
+        </label>
+        <div id="latestIntervalChart" class="chart-panel"></div>
+        <div id="latestIntervalDetails" class="chart-details" aria-live="polite" hidden>Hover, tap, or click a point to inspect it.</div>
+        <p id="latestIntervalCaption" class="chart-caption">Hover, tap, or click a point to inspect exact values.</p>
+      </section>
+    </div>
+  </div>
+
+  <div class="history-section">
+    <div class="history-section-header">
+      <div class="section-header">Session History</div>
+      <div class="history-section-actions">
+        <div id="historyStatsHelp" class="history-stats-help">
+          <button id="historyStatsInfoBtn" class="icon-button info-button" type="button" aria-expanded="false" aria-controls="historyStatsGlossary" aria-label="Open response-time statistics glossary" title="Response-time statistics glossary">i</button>
+          <div id="historyStatsGlossary" class="history-stats-glossary hidden" role="region" aria-label="Response-time statistics glossary">
+            <div class="history-stats-glossary-title">Response-time statistics</div>
+            <dl class="history-stats-glossary-list">
+              <dt>Median RT (correct)</dt>
+              <dd>The middle response time among correct responses only.</dd>
+              <dt>RT Spread (IQR)</dt>
+              <dd>The spread of the middle 50% of correct response times. Smaller values generally indicate more consistency.</dd>
+              <dt>Average RT (all)</dt>
+              <dd>The average across all scored questions. Incorrect or missed responses count as the full interval time.</dd>
+              <dt>—</dt>
+              <dd>Not recorded for sessions created before these statistics were added.</dd>
+            </dl>
+          </div>
+        </div>
+        <button id="exportHistoryCsvBtn" class="secondary-button history-list-export-button" type="button" aria-label="Export session report as CSV" title="Export session report as CSV">Export Session Report</button>
+        <button id="refreshSessionsBtn" class="icon-square-button history-refresh-icon" type="button" aria-label="Refresh session history" title="Refresh session history">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M20 12a8 8 0 0 1-14.9 4M4 12a8 8 0 0 1 14.9-4" />
+            <path d="M6 16H5v3m13-3h1v-3" />
+          </svg>
+        </button>
+        <div class="history-filter-anchor">
+          <button id="historyFilterBtn" class="icon-square-button" type="button" aria-expanded="false" aria-label="Filter session history">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 6h16M7 12h10M10 18h4" />
+            </svg>
+            <span id="historyFilterCountBadge" class="icon-badge hidden">0</span>
+          </button>
+          <div id="historyFiltersPanel" class="history-filters hidden">
+            <label class="field history-filter-field">
+              <span>Session Status</span>
+              <select id="historyStatusFilter">
+                <option value="all">All</option>
+                <option value="Completed">Completed</option>
+                <option value="Manually exited">Manually Exited</option>
+                <option value="Interrupted">Interrupted</option>
+              </select>
+            </label>
+            <label class="field history-filter-field">
+              <span>Arithmetic Mode</span>
+              <select id="historyModeFilter">
+                <option value="all">All</option>
+                <option value="addition">Addition</option>
+                <option value="multiplication">Multiplication</option>
+                <option value="subtraction">Subtraction (signed)</option>
+                <option value="difference">Difference (absolute)</option>
+              </select>
+            </label>
+            <label class="field history-filter-field">
+              <span>N-back Level</span>
+              <select id="historyNBackFilter">
+                <option value="all">All</option>
+                <option value="1">1-back</option>
+                <option value="2">2-back</option>
+                <option value="3">3-back</option>
+                <option value="4">4-back</option>
+                <option value="5">5-back</option>
+              </select>
+            </label>
+            <label class="field history-filter-field">
+              <span>Trend Inclusion</span>
+              <select id="historyTrendFilter">
+                <option value="all">All</option>
+                <option value="included">Included in trends</option>
+                <option value="excluded">Excluded from trends</option>
+              </select>
+            </label>
+            <div class="history-filter-actions">
+              <button id="resetHistoryFiltersBtn" class="secondary-button" type="button">Reset Filters</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="recentSessionsList" class="history-list"></div>
+    <div class="history-pagination">
+      <div id="historyPaginationSummary" class="history-pagination-summary" aria-live="polite">Showing 0 sessions</div>
+      <div class="history-pagination-controls">
+        <div id="historyPaginationIndicator" class="history-pagination-indicator">Page 0 of 0</div>
+        <div class="history-pagination-buttons">
+          <button id="historyPrevPageBtn" class="secondary-button history-pagination-button" type="button">← Previous</button>
+          <button id="historyNextPageBtn" class="secondary-button history-pagination-button" type="button">Next →</button>
+        </div>
+      </div>
+    </div>
+    <div class="history-reset-zone">
+      <div class="history-reset-note">Deletes saved history in this browser.</div>
+      <button id="clearSessionsOnlyBtn" class="secondary-button danger-button" type="button">Clear Sessions, Keep Totals</button>
+      <button id="clearAllHistoryBtn" class="secondary-button danger-button" type="button">Clear All History</button>
+    </div>
+  </div>
+
+  <div class="history-section trial-data-section">
+    <div class="history-section-header">
+      <div>
+        <div class="section-header">Trial Data</div>
+        <div class="trial-data-note">Trial logs are not included in session reports or backups. Download them separately.</div>
+      </div>
+      <div class="history-section-actions trial-data-actions">
+        <button id="selectAllTrialDataBtn" class="secondary-button trial-data-action-button" type="button">Select All</button>
+        <button id="clearTrialDataSelectionBtn" class="secondary-button trial-data-action-button" type="button" disabled>Clear Selection</button>
+        <button id="downloadSelectedTrialDataBtn" class="secondary-button trial-data-action-button" type="button" disabled>Download Selected</button>
+      </div>
+    </div>
+    <div id="trialDataSelectionSummary" class="trial-data-selection-summary" aria-live="polite">0 sessions selected</div>
+    <div class="trial-data-table-wrap">
+      <table class="trial-data-table">
+        <thead>
+          <tr>
+            <th class="trial-data-select-cell" scope="col">
+              <input id="trialDataSelectAllCheckbox" type="checkbox" aria-label="Select all trial logs">
+            </th>
+            <th scope="col">Session</th>
+            <th scope="col">Trials</th>
+            <th scope="col"><span class="visually-hidden">Download</span></th>
+          </tr>
+        </thead>
+        <tbody id="trialDataTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="settingsView">
+  <div class="settings">
+    <label class="toggle-field advanced-master-toggle">
+      <input type="checkbox" id="showAdvancedSettingsToggle">
+      Show Advanced Settings
+    </label>
+
+    <div class="settings-columns">
+      <div class="settings-column">
+        <section class="settings-section">
+          <div class="section-header">Appearance</div>
+          <label class="toggle-field"><input type="checkbox" id="themeToggle"> Dark mode</label>
+        </section>
+
+        <section class="settings-section">
+          <div class="section-header">Session Behavior</div>
+          <label class="field">
+            <span>End session when</span>
+            <select id="endCondition">
+              <option value="timer">Time limit is reached</option>
+              <option value="correct">Correct-answer target is reached</option>
+            </select>
+          </label>
+          <label class="field child-field" id="durationField">
+            <span>Session time limit (minutes)</span>
+            <input type="number" id="duration" value="1" min="1">
+          </label>
+          <label class="field child-field locked" id="targetCorrectField">
+            <span>Correct answers needed</span>
+            <input type="number" id="targetCorrect" value="500" min="1" disabled>
+          </label>
+          <label class="field mode-field advanced-only hidden" id="modeField">
+            <span>Arithmetic mode <strong class="advanced-badge">Advanced</strong></span>
+            <select id="modeSelect">
+              <option value="addition">Addition (A + B)</option>
+              <option value="multiplication">Multiplication (A * B)</option>
+              <option value="subtraction">Subtraction (signed) (A - B)</option>
+              <option value="difference">Difference (absolute) (abs(A - B))</option>
+            </select>
+          </label>
+          <div class="advanced-only hidden n-back-setting" id="nBackLevelField">
+            <div class="field">
+              <span>
+                <label for="nBackLevelInput">N-back level <strong class="advanced-badge">Advanced</strong></label>
+                <span class="n-back-help settings-tooltip">
+                  <button
+                    id="nBackInfoBtn"
+                    class="icon-button info-button"
+                    type="button"
+                    aria-expanded="false"
+                    aria-label="N-back level help"
+                    title="N-back level help"
+                  >i</button>
+                  <span id="nBackTooltip" class="tooltip-box" role="tooltip">Sets how many trials back to compare with the latest number. 1-back uses the previous number; 2-back uses the number from two trials earlier.</span>
+                </span>
+              </span>
+              <input type="number" id="nBackLevelInput" value="1" min="1" max="5" step="1" aria-describedby="nBackTooltip">
+            </div>
+          </div>
+        </section>
+
+        <div id="advancedSections" class="advanced-sections hidden">
+          <section class="settings-section">
+            <div class="section-header">Timing Display</div>
+            <label class="toggle-field"><input type="checkbox" id="showIntervalTimingToggle"> Show interval timing data</label>
+          </section>
+        </div>
+      </div>
+
+      <div class="settings-column">
+        <section class="settings-section">
+          <div class="section-header">Audio</div>
+          <div class="audio-subsection-header">Voice</div>
+          <label class="field voice-field">
+            <span>Voice selection</span>
+            <div class="voice-control-group">
+              <select id="voiceSelect">
+                <option value="nathan">Nathan</option>
+              </select>
+              <button id="voiceTestBtn" class="secondary-button voice-test-button" type="button">Test Voice</button>
+            </div>
+          </label>
+          <label class="field">
+            <span>Playback speed <strong id="playbackSpeedValue">1x</strong></span>
+            <input type="range" id="playbackSpeedSelect" min="1" max="1.5" step="0.1" value="1">
+          </label>
+          <div class="audio-subsection-header beep-subsection">Error beep</div>
+          <label class="toggle-field"><input type="checkbox" id="beepToggle" checked> Beep on error</label>
+          <label class="field" id="beepVolumeField">
+            <span>Beep volume <strong id="beepVolumeValue">50%</strong></span>
+            <input type="range" id="beepVolume" min="0" max="100" step="1" value="50">
+          </label>
+          <button id="beepTestBtn" class="secondary-button" type="button">Test Beep</button>
+        </section>
+
+        <section class="settings-section">
+          <div class="section-header">Interval &amp; Difficulty</div>
+          <label class="field">
+            <span>Starting Interval (ms)</span>
+            <div class="interval-number-control">
+              <input type="number" id="startingInterval" value="3000" min="100" max="3000" step="1">
+              <span class="interval-step-buttons">
+                <button type="button" class="interval-step-button" data-interval-input="startingInterval" data-interval-direction="up" aria-label="Increase starting interval">▲</button>
+                <button type="button" class="interval-step-button" data-interval-input="startingInterval" data-interval-direction="down" aria-label="Decrease starting interval">▼</button>
+              </span>
+            </div>
+          </label>
+          <label class="field">
+            <span>Maximum Interval (ms)</span>
+            <div class="interval-number-control">
+              <input type="number" id="maximumInterval" value="3000" min="100" max="3000" step="1">
+              <span class="interval-step-buttons">
+                <button type="button" class="interval-step-button" data-interval-input="maximumInterval" data-interval-direction="up" aria-label="Increase maximum interval">▲</button>
+                <button type="button" class="interval-step-button" data-interval-input="maximumInterval" data-interval-direction="down" aria-label="Decrease maximum interval">▼</button>
+              </span>
+            </div>
+          </label>
+          <div id="advancedSettingsPanel" class="advanced-settings hidden">
+            <label class="field">
+              <span>Minimum Interval (ms)</span>
+              <div class="interval-number-control">
+                <input type="number" id="minimumInterval" value="700" min="100" max="3000" step="1">
+                <span class="interval-step-buttons">
+                  <button type="button" class="interval-step-button" data-interval-input="minimumInterval" data-interval-direction="up" aria-label="Increase minimum interval">▲</button>
+                  <button type="button" class="interval-step-button" data-interval-input="minimumInterval" data-interval-direction="down" aria-label="Decrease minimum interval">▼</button>
+                </span>
+              </div>
+            </label>
+            <label class="field">
+              <span>Interval Increment <strong id="intervalIncrementValue">100</strong></span>
+              <input type="range" id="intervalIncrement" min="10" max="100" step="10" value="100">
+            </label>
+            <div class="section-header advanced-subsection-header">
+              <span>Threshold Settings</span>
+              <span class="threshold-help settings-tooltip">
+                <button
+                  id="thresholdInfoBtn"
+                  class="icon-button info-button"
+                  type="button"
+                  aria-expanded="false"
+                  aria-label="Thresholds help"
+                  title="Thresholds help"
+                >i</button>
+                <span class="tooltip-box" role="tooltip">Correct threshold: consecutive correct answers before the interval gets shorter. Incorrect threshold: consecutive incorrect answers before it gets longer.</span>
+              </span>
+            </div>
+            <label class="field">
+              <span>Correct threshold <strong id="correctThresholdValue">4</strong></span>
+              <input type="range" id="correctThreshold" min="1" max="10" step="1" value="4">
+            </label>
+            <label class="field">
+              <span>Incorrect threshold <strong id="incorrectThresholdValue">4</strong></span>
+              <input type="range" id="incorrectThreshold" min="1" max="10" step="1" value="4">
+            </label>
+            <div class="preset-row">
+              <button id="normalThresholdPresetBtn" class="secondary-button" type="button">Balanced</button>
+              <button id="highAccuracyPresetBtn" class="secondary-button" type="button">Strict</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+  </div>
+
+  <button id="startBtn" class="primary-button">Start</button>
+  <div class="settings-reset-zone">
+    <button id="resetSettingsBtn" class="secondary-button danger-button settings-reset-button" type="button">Reset Settings to Default</button>
+  </div>
+  <div class="settings-history-zone">
+    <button id="historyBtn" class="secondary-button" type="button">Training History</button>
+  </div>
+</div>
+</div>
+<div id="footerView" class="footer">
+<p>Thanks to EEE for supplying the original source code</p>
+</div>
+<script src="audio/voices.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
