@@ -53,7 +53,14 @@ const APP_SHELL=[
 self.addEventListener("install",event=>{
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache=>cache.addAll(APP_SHELL))
+      .then(async cache=>{
+        const coreAssets=APP_SHELL.filter(url=>!url.endsWith(".mp3"));
+        const audioAssets=APP_SHELL.filter(url=>url.endsWith(".mp3"));
+        // Atomically cache core application shell
+        await cache.addAll(coreAssets);
+        // Non-blocking resilient caching for voice packs
+        await Promise.allSettled(audioAssets.map(url=>cache.add(url)));
+      })
       .then(()=>self.skipWaiting())
   );
 });
@@ -77,6 +84,24 @@ self.addEventListener("fetch",event=>{
   const requestUrl=new URL(request.url);
   if(requestUrl.origin!==self.location.origin) return;
 
+  // Cache-first strategy for immutable audio files
+  if(requestUrl.pathname.endsWith(".mp3")){
+    event.respondWith(
+      caches.match(request).then(cachedResponse=>{
+        if(cachedResponse) return cachedResponse;
+        return fetch(request).then(response=>{
+          if(response.ok){
+            const copy=response.clone();
+            void caches.open(CACHE_NAME).then(cache=>cache.put(request,copy));
+          }
+          return response;
+        });
+      })
+    );
+    return;
+  }
+
+  // Network-first for navigation
   if(request.mode==="navigate"){
     event.respondWith(
       fetch(request)
@@ -92,6 +117,7 @@ self.addEventListener("fetch",event=>{
     return;
   }
 
+  // Stale-while-revalidate for other assets
   event.respondWith(
     caches.match(request).then(cachedResponse=>{
       const networkResponse=fetch(request)

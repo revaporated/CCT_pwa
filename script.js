@@ -4095,7 +4095,15 @@ function populateVoiceSelect(){
 }
 
 function getClockTime(){
-  return window.performance&&window.performance.now?window.performance.now():Date.now();
+  return window.performance && window.performance.now ? window.performance.now() : Date.now();
+}
+
+function getEventTime(event){
+  // DOMHighResTimeStamp from hardware touch/key driver
+  if(event && typeof event.timeStamp === "number" && event.timeStamp > 0){
+    return event.timeStamp;
+  }
+  return getClockTime();
 }
 
 async function requestSessionWakeLock(){
@@ -4160,23 +4168,57 @@ function loadAudioClip(src){
   return audio;
 }
 
+// 1-sample silent WAV to force iOS AVAudioSession into the 'Playback' category (ignores silent switch)
+const IOS_SILENT_UNLOCK_WAV="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+let iosSilentUnlockAudio=null;
+
 function getStimulusAudioContext(){
   if(stimulusAudioContext && stimulusAudioContext.state!=="closed") return stimulusAudioContext;
   const AudioContextCtor=window.AudioContext||window.webkitAudioContext;
   if(!AudioContextCtor) return null;
   try{
-    stimulusAudioContext=new AudioContextCtor();
+    stimulusAudioContext=new AudioContextCtor({ latencyHint:"interactive" });
   }catch(e){
-    stimulusAudioContext=null;
+    try{
+      stimulusAudioContext=new AudioContextCtor();
+    }catch(err){
+      stimulusAudioContext=null;
+    }
   }
   return stimulusAudioContext;
 }
 
 async function resumeStimulusAudioContext(){
-  const context=getStimulusAudioContext();
-  if(!context || context.state!=="suspended" || typeof context.resume!=="function") return;
+  // 1. iOS 16.4+ audioSession API
+  if(navigator.audioSession && navigator.audioSession.type!=="playback"){
+    try{
+      navigator.audioSession.type="playback";
+    }catch(e){}
+  }
+
+  // 2. iOS < 16.4 silent switch bypass via HTML5 Audio
+  if(!iosSilentUnlockAudio){
+    iosSilentUnlockAudio=new Audio(IOS_SILENT_UNLOCK_WAV);
+    iosSilentUnlockAudio.preload="auto";
+  }
   try{
-    await context.resume();
+    await iosSilentUnlockAudio.play();
+  }catch(e){}
+
+  // 3. Shared Web Audio warm-up
+  const context=getStimulusAudioContext();
+  if(!context) return;
+  if(context.state==="suspended" || context.state==="interrupted"){
+    try{
+      await context.resume();
+    }catch(e){}
+  }
+  try{
+    const warmBuffer=context.createBuffer(1,1,22050);
+    const warmSource=context.createBufferSource();
+    warmSource.buffer=warmBuffer;
+    warmSource.connect(context.destination);
+    warmSource.start(0);
   }catch(e){}
 }
 
@@ -4261,6 +4303,15 @@ async function testSelectedVoice(){
   }
 
   try{
+    await resumeStimulusAudioContext();
+    const bufferEntry=await preloadVoiceBuffers(voice);
+    if(bufferEntry && bufferEntry.ready){
+      const clipNumbers=Object.keys(bufferEntry.buffers).map(Number).filter(Number.isFinite);
+      const clipNumber=clipNumbers.length ? clipNumbers[Math.floor(Math.random()*clipNumbers.length)] : 1;
+      playStimulusAudio(clipNumber);
+      return;
+    }
+
     await preloadVoice(voice);
     const entry=voiceAudioCache[voice];
     const clipNumbers=entry && entry.clips ? Object.keys(entry.clips).map(Number).filter(Number.isFinite) : [];
@@ -4377,24 +4428,23 @@ function updateLatestTraceResponseTime(responseTime,traceIndex=sessionIntervalTr
 }
 
 function playBeep(force=false){
-  if(!force && !beepEnabled)return;
-  const AudioContextCtor=window.AudioContext||window.webkitAudioContext;
-  if(!AudioContextCtor) return;
+  if(!force && !beepEnabled) return;
+  const ctx=getStimulusAudioContext();
+  if(!ctx) return;
 
-  if(!beepAudioContext){
-    beepAudioContext=new AudioContextCtor();
-  }
-
-  const ctx=beepAudioContext;
   if(ctx.state==="suspended" && typeof ctx.resume==="function"){
     void ctx.resume();
   }
 
+  const now=ctx.currentTime;
   const o=ctx.createOscillator();
   const g=ctx.createGain();
-  o.frequency.value=1200; g.gain.value=getBeepGain();
-  o.connect(g); g.connect(ctx.destination);
-  o.start(); o.stop(ctx.currentTime+0.12);
+  o.frequency.setValueAtTime(1200,now);
+  g.gain.setValueAtTime(getBeepGain(),now);
+  o.connect(g);
+  g.connect(ctx.destination);
+  o.start(now);
+  o.stop(now+0.12);
   o.onended=()=>{
     try{
       o.disconnect();
@@ -4404,14 +4454,7 @@ function playBeep(force=false){
 }
 
 async function closeBeepAudioContext(){
-  if(!beepAudioContext) return;
-  const ctx=beepAudioContext;
-  beepAudioContext=null;
-  try{
-    if(typeof ctx.close==="function" && ctx.state!=="closed"){
-      await ctx.close();
-    }
-  }catch(e){}
+  // No-op: shared audio context is preserved to eliminate cold-start latency
 }
 
 function getRandomNumber(){return Math.floor(Math.random()*9)+1;}
@@ -4816,13 +4859,7 @@ function isAllowedSessionClick(target){
 }
 
 function restoreAnswerFocus(){
-  if(sessionState!=="active") return;
-  if(document.activeElement===answer) return;
-  try{
-    answer.focus({ preventScroll:true });
-  }catch(e){
-    answer.focus();
-  }
+  // Intentionally blank: prevents mobile keyboard/accessory bar invocation on readonly input
 }
 
 function formatPercent(value){
@@ -4927,25 +4964,25 @@ function renderResults(responseTimeStats){
   resultStatus.textContent=sessionOutcome;
 }
 
-function scheduleNextStimulus(delay=interval){
+function scheduleNextStimulus(delay=interval,expectedAt=getClockTime()+delay){
   if(!gameRunning)return;
 
   const scheduleSerial=++stimulusScheduleSerial;
   clearTimeout(timeoutId);
   timeoutId=setTimeout(()=>{
     if(!gameRunning || scheduleSerial!==stimulusScheduleSerial) return;
-    runStimulus();
+    runStimulus(expectedAt);
   },Math.max(0,delay));
 }
 
 function scheduleNextStimulusFromLastStimulus(){
   if(!gameRunning) return;
-  const anchorAt=lastStimulusAt || getClockTime();
-  const nextStimulusAt=anchorAt+interval;
+  const now=getClockTime();
+  const nextStimulusAt=lastStimulusAt>0 ? Math.max(now,lastStimulusAt+interval) : now+interval;
   if(endCondition==="timer" && stimulusProductionEndAt>0 && nextStimulusAt>=stimulusProductionEndAt){
     return;
   }
-  scheduleNextStimulus(nextStimulusAt-getClockTime());
+  scheduleNextStimulus(nextStimulusAt-now,nextStimulusAt);
 }
 
 function startStimulusScheduler(startedAt=getClockTime()){
@@ -4953,7 +4990,7 @@ function startStimulusScheduler(startedAt=getClockTime()){
   scheduleNextStimulusFromLastStimulus();
 }
 
-function runStimulus(){
+function runStimulus(scheduledAt=getClockTime()){
   if(!gameRunning)return;
 
   isStimulusTick=true;
@@ -4961,8 +4998,9 @@ function runStimulus(){
   const num=getRandomNumber();
   const now=getClockTime();
   const stimulusInterval=interval;
+  lastStimulusAt=scheduledAt;
   const audibleAt=now+sessionHeadphoneDelayMs;
-  lastStimulusAt=now;
+
   stimulusHistory.push(num);
   if(stimulusHistory.length>nBackLevel+1){
     stimulusHistory.shift();
@@ -4971,7 +5009,7 @@ function runStimulus(){
   sessionIntervalTrace.push({
     questionNumber:stimulusCount,
     interval:stimulusInterval,
-    timestamp:audibleAt,
+    timestamp:Date.now()+sessionHeadphoneDelayMs,
     responseTime:null
   });
   const traceIndex=sessionIntervalTrace.length-1;
@@ -4991,7 +5029,7 @@ function runStimulus(){
 function updateTimer(){
   countdownTimerId=null;
   if(!gameRunning||endCondition!=="timer")return;
-  const remainingMs=Math.min(sessionDurationMs,endTime-Date.now());
+  const remainingMs=Math.min(sessionDurationMs,stimulusProductionEndAt-getClockTime());
   const r=Math.max(0,Math.ceil(remainingMs/1000));
   const displayValue=String(r);
   if(timeLeft.textContent!==displayValue){
@@ -5013,10 +5051,10 @@ async function startGame(){
   selectedVoice=resolveVoiceKey(voiceSelect.value);
   voiceSelect.value=selectedVoice;
   const audioResumePromise=resumeStimulusAudioContext();
-  const audioReadyPromise=Promise.all([
-    preloadVoice(selectedVoice),
-    preloadVoiceBuffers(selectedVoice)
-  ]);
+  const audioReadyPromise=preloadVoiceBuffers(selectedVoice).then(entry=>{
+    if(!entry) return preloadVoice(selectedVoice);
+    return entry;
+  });
 
   validateIntervalInput(startingIntervalInput);
   validateIntervalInput(minimumIntervalInput);
@@ -5102,12 +5140,11 @@ async function startGame(){
 
     gameRunning=true;
     setSessionState("active");
-    answer.focus();
     void requestSessionWakeLock();
 
     startStimulusScheduler(activeClockAt);
     if(endCondition==="timer") updateTimer();
-    tickIntervalTime(); // START CONTINUOUS TRACKING
+    tickIntervalTime();
   },100);
 }
 
@@ -5137,7 +5174,6 @@ function stopGame(reason="manual"){
     countdownTimerId=null;
   }
   stopStimulusAudioPlayback();
-  void closeBeepAudioContext();
   void releaseSessionWakeLock();
 
   if(awaitingAnswer && activeQuestionState){
@@ -5149,7 +5185,6 @@ function stopGame(reason="manual"){
   }
   clearPendingAnswer();
 
-  answer.blur();
   resetQuestionStates();
 
   // finalize last interval
@@ -5643,16 +5678,20 @@ showAdvancedSettingsToggle.addEventListener("change",()=>{
     syncNBackInfoAria();
   }
 });
-answer.addEventListener("input",checkInputLive);
+answer.addEventListener("input",event=>{
+  checkInputLive(event,getEventTime(event));
+});
+
 keypadButtons.forEach(button=>{
   button.addEventListener("pointerdown",event=>{
     if(event.pointerType==="mouse" && event.button!==0) return;
     event.preventDefault();
+    const touchTime=getEventTime(event);
     button.classList.add("is-pressed");
     enterAnswerFromKeypad({
       value:button.dataset.keypadValue ?? null,
       action:button.dataset.keypadAction ?? null,
-      submittedAt:getClockTime()
+      submittedAt:touchTime
     });
   });
   const releasePressedState=()=>button.classList.remove("is-pressed");
@@ -5660,42 +5699,26 @@ keypadButtons.forEach(button=>{
   button.addEventListener("pointercancel",releasePressedState);
   button.addEventListener("pointerleave",releasePressedState);
 });
+
 document.addEventListener("keydown",event=>{
   if(sessionState!=="active" || event.repeat) return;
+  const keyTime=getEventTime(event);
   if(/^\d$/.test(event.key)){
     event.preventDefault();
-    enterAnswerFromKeypad({ value:event.key, submittedAt:getClockTime() });
+    enterAnswerFromKeypad({ value:event.key, submittedAt:keyTime });
     return;
   }
   if(event.key==="Backspace"){
     event.preventDefault();
-    enterAnswerFromKeypad({ action:"backspace", submittedAt:getClockTime() });
+    enterAnswerFromKeypad({ action:"backspace", submittedAt:keyTime });
     return;
   }
   if(event.key==="-" || event.key==="Subtract"){
     event.preventDefault();
-    enterAnswerFromKeypad({ action:"minus", submittedAt:getClockTime() });
+    enterAnswerFromKeypad({ action:"minus", submittedAt:keyTime });
   }
 });
-document.addEventListener("pointerdown",event=>{
-  if(sessionState!=="active") return;
-  if(isAllowedSessionClick(event.target)) return;
-  event.preventDefault();
-  restoreAnswerFocus();
-},true);
-answer.addEventListener("blur",()=>{
-  if(sessionState!=="active") return;
-  setTimeout(()=>{
-    if(sessionState==="active" && !isAllowedSessionClick(document.activeElement)){
-      restoreAnswerFocus();
-    }
-  },0);
-});
-window.addEventListener("focus",()=>{
-  if(sessionState==="active"){
-    restoreAnswerFocus();
-  }
-});
+
 document.addEventListener("visibilitychange",()=>{
   if(document.visibilityState==="hidden" && sessionState==="active"){
     stopGame("interrupted");
@@ -5743,10 +5766,14 @@ window.addEventListener("pagehide",()=>{
   }
 });
 async function initializeApp(){
+  if(navigator.storage && typeof navigator.storage.persist==="function"){
+    void navigator.storage.persist().catch(()=>{});
+  }
   await refreshVoiceLibrary();
   applySettings(readSavedSettings());
-  void preloadVoice(selectedVoice);
-  void preloadVoiceBuffers(selectedVoice);
+  void preloadVoiceBuffers(selectedVoice).then(entry=>{
+    if(!entry) void preloadVoice(selectedVoice);
+  });
   setSessionState("idle");
   historyVisible=false;
   updateAppViews();
